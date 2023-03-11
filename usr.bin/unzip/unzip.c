@@ -36,13 +36,17 @@
  * options.
  */
 
+#include <sys/capsicum.h>
 #include <sys/queue.h>
 #include <sys/stat.h>
 
+#include <capsicum_helpers.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <iconv.h>
+#include <paths.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -320,11 +324,11 @@ accept_pathname(const char *pathname)
  * precautions on they way.
  */
 static void
-make_dir(const char *path, int mode)
+make_dir(int cdfd, const char *path, int mode)
 {
 	struct stat sb;
 
-	if (lstat(path, &sb) == 0) {
+	if (fstatat(cdfd, path, &sb, AT_SYMLINK_NOFOLLOW) == 0) {
 		if (S_ISDIR(sb.st_mode))
 			return;
 		/*
@@ -340,9 +344,9 @@ make_dir(const char *path, int mode)
 		 * Don't check unlink() result; failure will cause mkdir()
 		 * to fail later, which we will catch.
 		 */
-		(void)unlink(path);
+		(void)unlinkat(cdfd, path, 0);
 	}
-	if (mkdir(path, mode) != 0 && errno != EEXIST)
+	if (mkdirat(cdfd, path, mode) != 0 && errno != EEXIST)
 		error("mkdir('%s')", path);
 }
 
@@ -353,7 +357,7 @@ make_dir(const char *path, int mode)
  * XXX inefficient + modifies the file in-place
  */
 static void
-make_parent(char *path)
+make_parent(int cdfd, char *path)
 {
 	struct stat sb;
 	char *sep;
@@ -362,15 +366,15 @@ make_parent(char *path)
 	if (sep == NULL || sep == path)
 		return;
 	*sep = '\0';
-	if (lstat(path, &sb) == 0) {
+	if (fstatat(cdfd, path, &sb, AT_SYMLINK_NOFOLLOW) == 0) {
 		if (S_ISDIR(sb.st_mode)) {
 			*sep = '/';
 			return;
 		}
-		unlink(path);
+		unlinkat(cdfd, path, 0);
 	}
-	make_parent(path);
-	mkdir(path, 0755);
+	make_parent(cdfd, path);
+	mkdirat(cdfd, path, 0755);
 	*sep = '/';
 
 #if 0
@@ -389,7 +393,8 @@ make_parent(char *path)
  * Extract a directory.
  */
 static void
-extract_dir(struct archive *a, struct archive_entry *e, const char *path)
+extract_dir(struct archive *a, struct archive_entry *e, int cdfd,
+    const char *path)
 {
 	int mode;
 
@@ -421,7 +426,7 @@ extract_dir(struct archive *a, struct archive_entry *e, const char *path)
 		mode |= 0001;
 
 	info("   creating: %s/\n", path);
-	make_dir(path, mode);
+	make_dir(cdfd, path, mode);
 	ac(archive_read_data_skip(a));
 }
 
@@ -429,7 +434,7 @@ static unsigned char buffer[8192];
 static char spinner[] = { '|', '/', '-', '\\' };
 
 static int
-handle_existing_file(char **path)
+handle_existing_file(int cdfd, char **path)
 {
 	size_t alen;
 	ssize_t len;
@@ -452,7 +457,7 @@ handle_existing_file(char **path)
 			/* FALLTHROUGH */
 		case 'y':
 		case 'Y':
-			(void)unlink(*path);
+			(void)unlinkat(cdfd, *path, 0);
 			return 1;
 		case 'N':
 			n_opt = 1;
@@ -596,7 +601,7 @@ extract2fd(struct archive *a, char *pathname, int fd)
  * Extract a regular file.
  */
 static void
-extract_file(struct archive *a, struct archive_entry *e, char **path)
+extract_file(struct archive *a, struct archive_entry *e, int cdfd, char **path)
 {
 	int mode;
 	struct timespec mtime;
@@ -613,7 +618,7 @@ extract_file(struct archive *a, struct archive_entry *e, char **path)
 
 	/* look for existing file of same name */
 recheck:
-	if (lstat(*path, &sb) == 0) {
+	if (fstatat(cdfd, *path, &sb, AT_SYMLINK_NOFOLLOW) == 0) {
 		if (u_opt || f_opt) {
 			/* check if up-to-date */
 			if (S_ISREG(sb.st_mode) &&
@@ -621,15 +626,15 @@ recheck:
 			    (sb.st_mtim.tv_sec == mtime.tv_sec &&
 			    sb.st_mtim.tv_nsec >= mtime.tv_nsec)))
 				return;
-			(void)unlink(*path);
+			(void)unlinkat(cdfd, *path, 0);
 		} else if (o_opt) {
 			/* overwrite */
-			(void)unlink(*path);
+			(void)unlinkat(cdfd, *path, 0);
 		} else if (n_opt) {
 			/* do not overwrite */
 			return;
 		} else {
-			check = handle_existing_file(path);
+			check = handle_existing_file(cdfd, path);
 			if (check == 0)
 				goto recheck;
 			if (check == -1)
@@ -647,18 +652,18 @@ recheck:
 	/* process symlinks */
 	linkname = archive_entry_symlink(e);
 	if (linkname != NULL) {
-		if (symlink(linkname, *path) != 0)
+		if (symlinkat(linkname, cdfd, *path) != 0)
 			error("symlink('%s')", *path);
 		info(" extracting: %s -> %s\n", *path, linkname);
-		if (lchmod(*path, mode) != 0)
+		if (fchmodat(cdfd, *path, mode, AT_SYMLINK_NOFOLLOW) != 0)
 			warning("Cannot set mode for '%s'", *path);
 		/* set access and modification time */
-		if (utimensat(AT_FDCWD, *path, ts, AT_SYMLINK_NOFOLLOW) != 0)
+		if (utimensat(cdfd, *path, ts, AT_SYMLINK_NOFOLLOW) != 0)
 			warning("utimensat('%s')", *path);
 		return;
 	}
 
-	if ((fd = open(*path, O_RDWR|O_CREAT|O_TRUNC, mode)) < 0)
+	if ((fd = openat(cdfd, *path, O_WRONLY | O_CREAT | O_TRUNC, mode)) < 0)
 		error("open('%s')", *path);
 
 	info(" extracting: %s", *path);
@@ -694,7 +699,7 @@ recheck:
  * wouldn't be extracted anyway.
  */
 static void
-extract(struct archive *a, struct archive_entry *e)
+extract(struct archive *a, struct archive_entry *e, int cdfd)
 {
 	char *pathname, *realpathname;
 	mode_t filetype;
@@ -750,12 +755,12 @@ extract(struct archive *a, struct archive_entry *e)
 	}
 
 	/* ensure that parent directory exists */
-	make_parent(realpathname);
+	make_parent(cdfd, realpathname);
 
 	if (S_ISDIR(filetype))
-		extract_dir(a, e, realpathname);
+		extract_dir(a, e, cdfd, realpathname);
 	else
-		extract_file(a, e, &realpathname);
+		extract_file(a, e, cdfd, &realpathname);
 
 	free(realpathname);
 	free(pathname);
@@ -878,10 +883,11 @@ test(struct archive *a, struct archive_entry *e)
 static const char *
 passphrase_callback(struct archive *a, void *_client_data)
 {
+	int *ttyfd;
 	char *p;
 
 	(void)a; /* UNUSED */
-	(void)_client_data; /* UNUSED */
+	ttyfd = _client_data;
 
 	if (passphrase_buf == NULL) {
 		passphrase_buf = malloc(PPBUFF_SIZE);
@@ -891,11 +897,14 @@ passphrase_callback(struct archive *a, void *_client_data)
 		}
 	}
 
-	p = readpassphrase("\nEnter password: ", passphrase_buf,
+	p = readpassphraseat(*ttyfd, "\nEnter password: ", passphrase_buf,
 		PPBUFF_SIZE, RPP_ECHO_OFF);
 
 	if (p == NULL && errno != EINTR)
 		error("Error reading password");
+
+	if (close(*ttyfd) != 0)
+		error("close('%s')", _PATH_TTY);
 
 	return p;
 }
@@ -909,21 +918,67 @@ unzip(const char *fn)
 {
 	struct archive *a;
 	struct archive_entry *e;
-	int ret;
+	cap_rights_t rights;
 	uintmax_t total_size, file_count, error_count;
+	unsigned long cmds[2];
+	int arfd, cdfd, ret, ttyfd;
+	char *cd;
 
 	if ((a = archive_read_new()) == NULL)
 		error("archive_read_new failed");
 
 	ac(archive_read_support_format_zip(a));
 
-	if (P_arg)
+	if (P_arg) {
 		archive_read_add_passphrase(a, P_arg);
-	else
-		archive_read_set_passphrase_callback(a, NULL,
-			&passphrase_callback);
+	} else {
+		if ((ttyfd = open(_PATH_TTY, O_RDWR)) < 0)
+			error("open('%s')", _PATH_TTY);
 
-	ac(archive_read_open_filename(a, fn, 8192));
+		cap_rights_init(&rights, CAP_IOCTL, CAP_READ, CAP_WRITE);
+		if (caph_rights_limit(ttyfd, &rights) < 0)
+			error("unable to limit capability rights");
+
+		cmds[0] = TIOCGETA;
+		cmds[1] = TIOCSETAF;
+		if (caph_ioctls_limit(ttyfd, cmds, 2) < 0)
+			error("unable to limit capability ioctl commands");
+
+		archive_read_set_passphrase_callback(a, &ttyfd,
+			&passphrase_callback);
+	}
+
+	if ((arfd = open(fn, O_RDONLY)) < 0)
+		error("open('%s')", fn);
+
+	cap_rights_init(&rights, CAP_FSTAT, CAP_READ, CAP_SEEK);
+	if (caph_rights_limit(arfd, &rights) < 0)
+		error("unable to limit capability rights");
+
+	if ((cd = getcwd(NULL, 0)) == NULL)
+		error("getcwd()");
+
+	if ((cdfd = open(cd, O_DIRECTORY)) < 0)
+		error("open('%s')", cd);
+
+	free(cd);
+
+	cap_rights_init(&rights, CAP_CREATE, CAP_FSTATAT, CAP_FTRUNCATE, CAP_FUTIMES,
+	    CAP_MKDIRAT, CAP_SYMLINKAT, CAP_UNLINKAT, CAP_WRITE);
+	if (caph_rights_limit(cdfd, &rights) < 0)
+		error("unable to limit capability rights");
+
+	if (caph_limit_stdio() < 0)
+		error("unable to limit capability rights");
+
+	__iconv_preopen();
+	caph_cache_tzdata();
+	caph_cache_catpages();
+
+	if (caph_enter() < 0)
+		error("failed to enter capability mode");
+
+	ac(archive_read_open_fd(a, arfd, 8192));
 
 	if (!zipinfo_mode) {
 		if (!p_opt && !q_opt)
@@ -953,7 +1008,7 @@ unzip(const char *fn)
 			else if (p_opt || c_opt)
 				extract_stdout(a, e);
 			else
-				extract(a, e);
+				extract(a, e, cdfd);
 		} else {
 			if (Z1_opt)
 				list(a, e);

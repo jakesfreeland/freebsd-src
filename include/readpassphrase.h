@@ -34,6 +34,8 @@
 #define RPP_SEVENBIT    0x10		/* Strip the high bit from input. */
 #define RPP_STDIN       0x20		/* Read from stdin, not /dev/tty */
 
+#define	AT_STDIN	-101		/* File descriptor equivalent of RPP_STDIN. */
+
 #include <sys/cdefs.h>
 #include <sys/_types.h>
 
@@ -44,6 +46,7 @@ typedef	__size_t	size_t;
 
 __BEGIN_DECLS
 char * readpassphrase(const char *, char *, size_t, int);
+char * readpassphraseat(int, const char *, char *, size_t, int);
 __END_DECLS
 
 #endif /* !_READPASSPHRASE_H_ */

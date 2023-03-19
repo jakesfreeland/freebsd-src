@@ -494,6 +494,7 @@ MLINKS+=rand48.3 _rand48.3 \
 	rand48.3 nrand48.3 \
 	rand48.3 seed48.3 \
 	rand48.3 srand48.3
+MLINKS+=readpassphrase.3 readpassphraseat.3
 MLINKS+=recv.2 recvmmsg.2
 MLINKS+=scandir.3 alphasort.3 \
 	scandir.3 scandirat.3 \

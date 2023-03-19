@@ -30,6 +30,8 @@
 .In readpassphrase.h
 .Ft "char *"
 .Fn readpassphrase "const char *prompt" "char *buf" "size_t bufsiz" "int flags"
+.Ft "char *"
+.Fn readpassphraseat "int ttyfd" "const char *prompt" "char *buf" "size_t bufsiz" "int flags"
 .Sh DESCRIPTION
 The
 .Fn readpassphrase
@@ -54,9 +56,26 @@ Any additional
 characters and the terminating newline (or return) character are discarded.
 .Pp
 The
+.Fn readpassphraseat
+function is equivalent to
+.Fn readpassphrase ,
+but allows the user to specify a
+.Fa ttyfd
+terminal type device for prompting and password retrieval.
+Programs in
+.Xr capsicum 4
+capability mode can pass a pre-opened
+.Pa /dev/tty
+file descriptor into
+.Fn readpassphraseat
+to avoid triggering a capability violation.
+.Pp
+The
 .Fn readpassphrase
-function
-takes the following optional
+and
+.Fn readpassphraseat
+functions
+take the following optional
 .Fa flags :
 .Pp
 .Bl -tag -width ".Dv RPP_REQUIRE_TTY" -compact
@@ -76,13 +95,24 @@ strip the high bit from input
 force read of passphrase from stdin
 .El
 .Pp
+If
+.Dv AT_STDIN
+is assigned to
+.Fa ttyfd ,
+the passphrase will be force read from stdin.
+This is equivalent to specifying the
+.Dv RPP_STDIN
+flag.
+.Pp
 The calling process should zero the passphrase as soon as possible to
 avoid leaving the cleartext passphrase visible in the process's address
 space.
 .Sh RETURN VALUES
 Upon successful completion,
 .Fn readpassphrase
-returns a pointer to the NUL-terminated passphrase.
+and
+.Fn readpassphraseat
+return a pointer to the NUL-terminated passphrase.
 If an error is encountered, the terminal state is restored and
 a
 .Dv NULL
@@ -115,9 +145,7 @@ memset(passbuf, 0, sizeof(passbuf));
 .Sh ERRORS
 .Bl -tag -width Er
 .It Bq Er EINTR
-The
-.Fn readpassphrase
-function was interrupted by a signal.
+The passphrase reading was interrupted by a signal.
 .It Bq Er EINVAL
 The
 .Ar bufsiz
@@ -136,6 +164,14 @@ The system file table is full.
 There is no controlling terminal and the
 .Dv RPP_REQUIRE_TTY
 flag was specified.
+This error is only applicable to
+.Fn readpassphrase .
+.It Bq Er ENOTTY
+The provided
+.Fa ttyfd
+is an invalid controlling terminal.
+This error is only applicable to
+.Fn readpassphraseat .
 .El
 .Sh SIGNALS
 The
@@ -168,7 +204,8 @@ When the process is resumed after it has been stopped,
 will reprint the prompt and the user may then enter a passphrase.
 .Sh SEE ALSO
 .Xr sigaction 2 ,
-.Xr getpass 3
+.Xr getpass 3 ,
+.Xr capsicum 4
 .Sh STANDARDS
 The
 .Fn readpassphrase

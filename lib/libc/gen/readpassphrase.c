@@ -43,7 +43,7 @@ static volatile sig_atomic_t signo[NSIG];
 static void handler(int);
 
 char *
-readpassphrase(const char *prompt, char *buf, size_t bufsiz, int flags)
+readpassphraseat(int ttyfd, const char *prompt, char *buf, size_t bufsiz, int flags)
 {
 	ssize_t nr;
 	int input, output, save_errno, i, need_restart, input_is_tty;
@@ -58,6 +58,13 @@ readpassphrase(const char *prompt, char *buf, size_t bufsiz, int flags)
 		return(NULL);
 	}
 
+	/* Passing AT_STDIN in ttyfd is identical to RPP_STDIN. */
+	if (ttyfd == AT_STDIN ||
+	    ttyfd == STDIN_FILENO ||
+	    ttyfd == STDOUT_FILENO ||
+	    ttyfd == STDERR_FILENO)
+		flags |= RPP_STDIN;
+
 restart:
 	for (i = 0; i < NSIG; i++)
 		signo[i] = 0;
@@ -65,22 +72,17 @@ restart:
 	save_errno = 0;
 	need_restart = 0;
 	/*
-	 * Read and write to /dev/tty if available.  If not, read from
-	 * stdin and write to stderr unless a tty is required.
+	 * Read and write to terminal type device if valid.  If not, read
+	 * from stdin and write to stderr.
 	 */
 	input_is_tty = 0;
-	if (!(flags & RPP_STDIN)) {
-        	input = output = _open(_PATH_TTY, O_RDWR | O_CLOEXEC);
-		if (input == -1) {
-			if (flags & RPP_REQUIRE_TTY) {
-				errno = ENOTTY;
-				return(NULL);
-			}
-			input = STDIN_FILENO;
-			output = STDERR_FILENO;
-		} else {
-			input_is_tty = 1;
+	if ((flags & RPP_STDIN) == 0) {
+		if (isatty(ttyfd) != 1) {
+			errno = ENOTTY;
+			return (NULL);
 		}
+		input_is_tty = 1;
+		input = output = ttyfd;
 	} else {
 		input = STDIN_FILENO;
 		output = STDERR_FILENO;
@@ -160,8 +162,6 @@ restart:
 	(void)__libc_sigaction(SIGTSTP, &savetstp, NULL);
 	(void)__libc_sigaction(SIGTTIN, &savettin, NULL);
 	(void)__libc_sigaction(SIGTTOU, &savettou, NULL);
-	if (input_is_tty)
-		(void)_close(input);
 
 	/*
 	 * If we were interrupted by a signal, resend it to ourselves
@@ -184,6 +184,37 @@ restart:
 	if (save_errno)
 		errno = save_errno;
 	return(nr == -1 ? NULL : buf);
+}
+
+char *
+readpassphrase(const char *prompt, char *buf, size_t bufsiz, int flags)
+{
+	int save_errno, ttyfd;
+	char *error;
+
+	ttyfd = AT_STDIN;
+	/*
+	 * Pass /dev/tty fd into readpassphraseat() if available.
+	 * Otherwise, resort to stdin unless a tty is required.
+	 */
+	if ((flags & RPP_STDIN) == 0) {
+		ttyfd = _open(_PATH_TTY, O_RDWR | O_CLOEXEC);
+		if (ttyfd == -1) {
+			if ((flags & RPP_REQUIRE_TTY) != 0) {
+				errno = ENOTTY;
+				return (NULL);
+			}
+			ttyfd = AT_STDIN;
+		}
+	}
+	error = readpassphraseat(ttyfd, prompt, buf, bufsiz, flags);
+
+	save_errno = errno;
+	if (ttyfd != AT_STDIN)
+		(void)_close(ttyfd);
+	errno = save_errno;
+
+	return (error);
 }
 
 char *

@@ -253,29 +253,6 @@ static const int sigproptbl[NSIG] = {
 	[SIGUSR2] =	SIGPROP_KILL,
 };
 
-#define	_SIG_FOREACH_ADVANCE(i, set) ({					\
-	int __found;							\
-	for (;;) {							\
-		if (__bits != 0) {					\
-			int __sig = ffs(__bits);			\
-			__bits &= ~(1u << (__sig - 1));			\
-			sig = __i * sizeof((set)->__bits[0]) * NBBY + __sig; \
-			__found = 1;					\
-			break;						\
-		}							\
-		if (++__i == _SIG_WORDS) {				\
-			__found = 0;					\
-			break;						\
-		}							\
-		__bits = (set)->__bits[__i];				\
-	}								\
-	__found != 0;							\
-})
-
-#define	SIG_FOREACH(i, set)						\
-	for (int32_t __i = -1, __bits = 0;				\
-	    _SIG_FOREACH_ADVANCE(i, set); )				\
-
 static sigset_t fastblock_mask;
 
 static void

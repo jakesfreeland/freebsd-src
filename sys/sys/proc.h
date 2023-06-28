@@ -707,6 +707,7 @@ struct proc {
 	struct sigiolst	p_sigiolst;	/* (c) List of sigio sources. */
 	int		p_sigparent;	/* (c) Signal to parent on exit. */
 	int		p_sig;		/* (n) For core dump/debugger XXX. */
+	LIST_HEAD(, signalfd)	p_sfd;	/* (c) Sig descriptor queue. */
 	u_int		p_ptevents;	/* (c + e) ptrace() event mask. */
 	struct kaioinfo	*p_aioinfo;	/* (y) ASYNC I/O info. */
 	struct thread	*p_singlethread;/* (c + j) If single threading this is it */

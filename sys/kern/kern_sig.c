@@ -70,6 +70,7 @@
 #include <sys/resourcevar.h>
 #include <sys/sdt.h>
 #include <sys/sbuf.h>
+#include <sys/signalfd.h>
 #include <sys/sleepqueue.h>
 #include <sys/smp.h>
 #include <sys/stat.h>
@@ -2276,13 +2277,16 @@ tdsendsignal(struct proc *p, struct thread *td, int sig, ksiginfo_t *ksi)
 
 	/*
 	 * If the signal is being ignored, then we forget about it
-	 * immediately, except when the target process executes
-	 * sigwait().  (Note: we don't set SIGCONT in ps_sigignore,
-	 * and if it is set to SIG_IGN, action will be SIG_DFL here.)
+	 * immediately, except when the target process has an active
+	 * signalfd or executes sigwait().  (Note: we don't set
+	 * SIGCONT in ps_sigignore, and if it is set to SIG_IGN,
+	 * action will be SIG_DFL here.)
 	 */
 	mtx_lock(&ps->ps_mtx);
 	if (SIGISMEMBER(ps->ps_sigignore, sig)) {
-		if (kern_sig_discard_ign &&
+		if (!LIST_EMPTY(&p->p_sfd)) {
+			action = SIG_HOLD;
+		} else if (kern_sig_discard_ign &&
 		    (p->p_sysent->sv_flags & SV_SIG_DISCIGN) == 0) {
 			SDT_PROBE3(proc, , , signal__discard, td, p, sig);
 
@@ -2336,6 +2340,8 @@ tdsendsignal(struct proc *p, struct thread *td, int sig, ksiginfo_t *ksi)
 	ret = sigqueue_add(sigqueue, sig, ksi);
 	if (ret != 0)
 		return (ret);
+	if (!LIST_EMPTY(&p->p_sfd) && action != SIG_CATCH)
+		signalfd_post(p, sig);
 	signotify(td);
 	/*
 	 * Defer further processing for signals which are held,

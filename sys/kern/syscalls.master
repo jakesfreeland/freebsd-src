@@ -3333,5 +3333,12 @@
 		    uintptr_t idx2
 		);
 	}
+589	AUE_SIGNALFD	STD|CAPENABLED {
+		int signalfd(
+		    int fd,
+		    _In_ const sigset_t *mask,
+		    int flags
+		);
+	}
 
 ; vim: syntax=off

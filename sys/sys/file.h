@@ -68,6 +68,7 @@ struct nameidata;
 #define	DTYPE_PROCDESC	12	/* process descriptor */
 #define	DTYPE_EVENTFD	13	/* eventfd */
 #define	DTYPE_TIMERFD	14	/* timerfd */
+#define	DTYPE_SIGNALFD	15	/* signalfd */
 
 #ifdef _KERNEL
 

@@ -89,7 +89,7 @@ hostent_free(struct hostent *hp)
 	}
 }
 
-static struct hostent *
+struct hostent *
 hostent_unpack(const nvlist_t *nvl, struct hostent *hp)
 {
 	unsigned int ii, nitems;
@@ -245,7 +245,7 @@ cap_gethostbyaddr(cap_channel_t *chan, const void *addr, socklen_t len,
 	return (hp);
 }
 
-static struct addrinfo *
+struct addrinfo *
 addrinfo_unpack(const nvlist_t *nvl)
 {
 	struct addrinfo *ai;
@@ -742,7 +742,7 @@ net_allowed_hosts(const nvlist_t *limits, const char *name, const char *srvname)
 	return (false);
 }
 
-static void
+void
 hostent_pack(const struct hostent *hp, nvlist_t *nvl, bool addtocache)
 {
 	unsigned int ii;
@@ -936,7 +936,7 @@ out:
 	return (error);
 }
 
-static nvlist_t *
+nvlist_t *
 addrinfo_pack(const struct addrinfo *ai)
 {
 	nvlist_t *nvl;

@@ -91,6 +91,12 @@ struct hostent *cap_gethostbyname2(cap_channel_t *chan, const char *name,
     int af);
 struct hostent *cap_gethostbyaddr(cap_channel_t *chan, const void *addr,
     socklen_t len, int af);
+
+/* Structure packing functions. */
+nvlist_t *addrinfo_pack(const struct addrinfo *ai);
+struct addrinfo *addrinfo_unpack(const nvlist_t *nvl);
+void hostent_pack(const struct hostent *hp, nvlist_t *nvl, bool addtocache);
+struct hostent *hostent_unpack(const nvlist_t *nvl, struct hostent *hp);
 #else
 /* Capability functions. */
 #define cap_bind(chan, s, addr, addrlen)					\

@@ -142,7 +142,6 @@ static char sccsid[] = "@(#)syslogd.c	8.3 (Berkeley) 4/4/94";
 #include "pathnames.h"
 #include "syslogd.h"
 #include "syslogd_cap.h"
-#include "ttymsg.h"
 
 const char *ConfFile = _PATH_LOGCONF;
 static const char *PidFile = _PATH_LOGPID;
@@ -350,12 +349,10 @@ static int	evaluate_prop_filter(const struct prop_filter *filter,
 static nvlist_t *prop_filter_compile(const char *);
 static void	parsemsg(const char *, char *);
 static void	printsys(char *);
-static int	p_open(const char *, pid_t *);
 static const char *ttymsg_check(struct iovec *, int, char *, int);
 static void	usage(void);
 static bool	validate(struct sockaddr *, const char *);
 static void	unmapped(struct sockaddr *);
-static void	wallmsg(struct filed *, struct iovec *, const int iovlen);
 static int	waitdaemon(int);
 static void	increase_rcvbuf(int);
 
@@ -1670,16 +1667,6 @@ dofsync(void)
 	needdofsync = false;
 }
 
-/*
- * List of iovecs to which entries can be appended.
- * Used for constructing the message to be logged.
- */
-struct iovlist {
-	struct iovec	iov[TTYMSG_IOV_MAX];
-	size_t		iovcnt;
-	size_t		totalsize;
-};
-
 static void
 iovlist_init(struct iovlist *il)
 {
@@ -1836,8 +1823,16 @@ fprintlog_write(struct filed *f, struct iovlist *il, int flags)
 		dprintf(" %s\n", f->f_pname);
 		iovlist_append(il, "\n");
 		if (f->f_procdesc == -1) {
-			if ((f->f_file = p_open(f->f_pname,
-			    &f->f_procdesc)) < 0) {
+			struct filed *f_in_list;
+			int i = 0;
+
+			STAILQ_FOREACH(f_in_list, &fhead, next) {
+				if (f_in_list == f)
+					break;
+				++i;
+			}
+			f->f_file = p_open(i, f->f_pname, &f->f_procdesc);
+			if (f->f_file < 0) {
 				logerror(f->f_pname);
 				break;
 			}
@@ -2079,8 +2074,8 @@ fprintlog_successive(struct filed *f, int flags)
  *	Write the specified message to either the entire
  *	world, or a list of approved users.
  */
-static void
-wallmsg(struct filed *f, struct iovec *iov, const int iovlen)
+void
+wallmsg(const struct filed *f, struct iovec *iov, const int iovlen)
 {
 	static int reenter;			/* avoid calling ourselves */
 	struct utmpx *ut;
@@ -2096,10 +2091,8 @@ wallmsg(struct filed *f, struct iovec *iov, const int iovlen)
 			continue;
 		if (f->f_type == F_WALL) {
 			if ((p = ttymsg(iov, iovlen, ut->ut_line,
-			    TTYMSGTIME)) != NULL) {
-				errno = 0;	/* already in msg */
-				logerror(p);
-			}
+			    TTYMSGTIME)) != NULL)
+				dprintf("%s\n", p);
 			continue;
 		}
 		/* should we send the message to this user? */
@@ -2108,10 +2101,8 @@ wallmsg(struct filed *f, struct iovec *iov, const int iovlen)
 				break;
 			if (!strcmp(f->f_uname[i], ut->ut_user)) {
 				if ((p = ttymsg_check(iov, iovlen, ut->ut_line,
-				    TTYMSGTIME)) != NULL) {
-					errno = 0;	/* already in msg */
-					logerror(p);
-				}
+				    TTYMSGTIME)) != NULL)
+					dprintf("%s\n", p);
 				break;
 			}
 		}
@@ -3442,14 +3433,13 @@ validate(struct sockaddr *sa, const char *hname)
  * Fairly similar to popen(3), but returns an open descriptor, as
  * opposed to a FILE *.
  */
-static int
-p_open(const char *prog, int *rpd)
+int
+p_open(size_t filed_idx __unused, const char *prog, int *rpd)
 {
 	struct sigaction act = { };
 	int pfd[2], pd;
 	pid_t pid;
 	char *argv[4]; /* sh -c cmd NULL */
-	char errmsg[200];
 
 	if (pipe(pfd) == -1)
 		return (-1);
@@ -3464,18 +3454,14 @@ p_open(const char *prog, int *rpd)
 		argv[1] = strdup("-c");
 		argv[2] = strdup(prog);
 		argv[3] = NULL;
-		if (argv[0] == NULL || argv[1] == NULL || argv[2] == NULL) {
-			logerror("strdup");
-			exit(1);
-		}
+		if (argv[0] == NULL || argv[1] == NULL || argv[2] == NULL)
+			err(1, "strdup");
 
 		alarm(0);
 		act.sa_handler = SIG_DFL;
 		for (size_t i = 0; i < nitems(sigcatch); ++i) {
-			if (sigaction(sigcatch[i], &act, NULL) == -1) {
-				logerror("sigaction");
-				exit(1);
-			}
+			if (sigaction(sigcatch[i], &act, NULL) == -1)
+				err(1, "sigaction");
 		}
 
 		dup2(pfd[0], STDIN_FILENO);
@@ -3498,11 +3484,8 @@ p_open(const char *prog, int *rpd)
 	 */
 	if (fcntl(pfd[1], F_SETFL, O_NONBLOCK) == -1) {
 		/* This is bad. */
-		(void)snprintf(errmsg, sizeof(errmsg),
-			       "Warning: cannot change pipe to PID %d to "
-			       "non-blocking behaviour.",
-			       (int)pid);
-		logerror(errmsg);
+		dprintf("Warning: cannot change pipe to PID %d to non-blocking"
+		    "behaviour.", pid);
 	}
 	*rpd = pd;
 	return (pfd[1]);

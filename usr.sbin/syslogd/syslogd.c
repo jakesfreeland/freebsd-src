@@ -369,9 +369,9 @@ close_filed(struct filed *f)
 
 	switch (f->f_type) {
 	case F_FORW:
-		if (f->fu_forw_addr != NULL) {
-			freeaddrinfo(f->fu_forw_addr);
-			f->fu_forw_addr = NULL;
+		if (f->f_addr != NULL) {
+			freeaddrinfo(f->f_addr);
+			f->f_addr = NULL;
 		}
 		/* FALLTHROUGH */
 	case F_FILE:
@@ -380,9 +380,9 @@ close_filed(struct filed *f)
 		f->f_type = F_UNUSED;
 		break;
 	case F_PIPE:
-		if (f->fu_pipe_pd >= 0) {
-			deadq_enter(f->fu_pipe_pd);
-			f->fu_pipe_pd = -1;
+		if (f->f_procdesc >= 0) {
+			deadq_enter(f->f_procdesc);
+			f->f_procdesc = -1;
 		}
 		break;
 	default:
@@ -687,8 +687,8 @@ main(int argc, char *argv[])
 
 	consfile.f_type = F_CONSOLE;
 	consfile.f_file = -1;
-	(void)strlcpy(consfile.fu_fname, _PATH_CONSOLE + sizeof(_PATH_DEV) - 1,
-	    sizeof(consfile.fu_fname));
+	(void)strlcpy(consfile.f_fname, _PATH_CONSOLE + sizeof(_PATH_DEV) - 1,
+	    sizeof(consfile.f_fname));
 
 	nulldesc = open(_PATH_DEVNULL, O_RDWR);
 	if (nulldesc == -1) {
@@ -1739,18 +1739,18 @@ fprintlog_write(struct filed *f, struct iovlist *il, int flags)
 
 	switch (f->f_type) {
 	case F_FORW:
-		dprintf(" %s", f->fu_forw_hname);
-		switch (f->fu_forw_addr->ai_family) {
+		dprintf(" %s", f->f_hname);
+		switch (f->f_addr->ai_family) {
 #ifdef INET
 		case AF_INET:
 			dprintf(":%d\n",
-			    ntohs(satosin(f->fu_forw_addr->ai_addr)->sin_port));
+			    ntohs(satosin(f->f_addr->ai_addr)->sin_port));
 			break;
 #endif
 #ifdef INET6
 		case AF_INET6:
 			dprintf(":%d\n",
-			    ntohs(satosin6(f->fu_forw_addr->ai_addr)->sin6_port));
+			    ntohs(satosin6(f->f_addr->ai_addr)->sin6_port));
 			break;
 #endif
 		default:
@@ -1763,7 +1763,7 @@ fprintlog_write(struct filed *f, struct iovlist *il, int flags)
 #endif
 
 		lsent = 0;
-		for (r = f->fu_forw_addr; r; r = r->ai_next) {
+		for (r = f->f_addr; r; r = r->ai_next) {
 			memset(&msghdr, 0, sizeof(msghdr));
 			msghdr.msg_name = r->ai_addr;
 			msghdr.msg_namelen = r->ai_addrlen;
@@ -1813,7 +1813,7 @@ fprintlog_write(struct filed *f, struct iovlist *il, int flags)
 		break;
 
 	case F_FILE:
-		dprintf(" %s\n", f->fu_fname);
+		dprintf(" %s\n", f->f_fname);
 		iovlist_append(il, "\n");
 		if (writev(f->f_file, il->iov, il->iovcnt) < 0) {
 			/*
@@ -1825,7 +1825,7 @@ fprintlog_write(struct filed *f, struct iovlist *il, int flags)
 				int e = errno;
 				close_filed(f);
 				errno = e;
-				logerror(f->fu_fname);
+				logerror(f->f_fname);
 			}
 		} else if ((flags & SYNC_FILE) && (f->f_flags & FFLAG_SYNC)) {
 			f->f_flags |= FFLAG_NEEDSYNC;
@@ -1834,17 +1834,17 @@ fprintlog_write(struct filed *f, struct iovlist *il, int flags)
 		break;
 
 	case F_PIPE:
-		dprintf(" %s\n", f->fu_pipe_pname);
+		dprintf(" %s\n", f->f_pname);
 		iovlist_append(il, "\n");
-		if (f->fu_pipe_pd == -1) {
-			if ((f->f_file = p_open(f->fu_pipe_pname,
-			    &f->fu_pipe_pd)) < 0) {
-				logerror(f->fu_pipe_pname);
+		if (f->f_procdesc == -1) {
+			if ((f->f_file = p_open(f->f_pname,
+			    &f->f_procdesc)) < 0) {
+				logerror(f->f_pname);
 				break;
 			}
 		}
 		if (writev(f->f_file, il->iov, il->iovcnt) < 0) {
-			logerror(f->fu_pipe_pname);
+			logerror(f->f_pname);
 			close_filed(f);
 		}
 		break;
@@ -1857,10 +1857,10 @@ fprintlog_write(struct filed *f, struct iovlist *il, int flags)
 		/* FALLTHROUGH */
 
 	case F_TTY:
-		dprintf(" %s%s\n", _PATH_DEV, f->fu_fname);
+		dprintf(" %s%s\n", _PATH_DEV, f->f_fname);
 		iovlist_append(il, "\r\n");
 		errno = 0;	/* ttymsg() only sometimes returns an errno */
-		if ((msgret = ttymsg(il->iov, il->iovcnt, f->fu_fname, 10))) {
+		if ((msgret = ttymsg(il->iov, il->iovcnt, f->f_fname, 10))) {
 			f->f_type = F_UNUSED;
 			logerror(msgret);
 		}
@@ -2105,9 +2105,9 @@ wallmsg(struct filed *f, struct iovec *iov, const int iovlen)
 		}
 		/* should we send the message to this user? */
 		for (i = 0; i < MAXUNAMES; i++) {
-			if (!f->fu_uname[i][0])
+			if (!f->f_uname[i][0])
 				break;
-			if (!strcmp(f->fu_uname[i], ut->ut_user)) {
+			if (!strcmp(f->f_uname[i], ut->ut_user)) {
 				if ((p = ttymsg_check(iov, iovlen, ut->ut_line,
 				    TTYMSGTIME)) != NULL) {
 					errno = 0;	/* already in msg */
@@ -2525,44 +2525,43 @@ init(bool reload)
 			printf("%s: ", TypeNames[f->f_type]);
 			switch (f->f_type) {
 			case F_FILE:
-				printf("%s", f->fu_fname);
+				printf("%s", f->f_fname);
 				break;
 
 			case F_CONSOLE:
 			case F_TTY:
-				printf("%s%s", _PATH_DEV, f->fu_fname);
+				printf("%s%s", _PATH_DEV, f->f_fname);
 				break;
 
 			case F_FORW:
-				switch (f->fu_forw_addr->ai_family) {
+				switch (f->f_addr->ai_family) {
 #ifdef INET
 				case AF_INET:
-					port = ntohs(satosin(f->fu_forw_addr->ai_addr)->sin_port);
+					port = ntohs(satosin(f->f_addr->ai_addr)->sin_port);
 					break;
 #endif
 #ifdef INET6
 				case AF_INET6:
-					port = ntohs(satosin6(f->fu_forw_addr->ai_addr)->sin6_port);
+					port = ntohs(satosin6(f->f_addr->ai_addr)->sin6_port);
 					break;
 #endif
 				default:
 					port = 0;
 				}
 				if (port != 514) {
-					printf("%s:%d",
-						f->fu_forw_hname, port);
+					printf("%s:%d", f->f_hname, port);
 				} else {
-					printf("%s", f->fu_forw_hname);
+					printf("%s", f->f_hname);
 				}
 				break;
 
 			case F_PIPE:
-				printf("%s", f->fu_pipe_pname);
+				printf("%s", f->f_pname);
 				break;
 
 			case F_USERS:
-				for (i = 0; i < MAXUNAMES && *f->fu_uname[i]; i++)
-					printf("%s, ", f->fu_uname[i]);
+				for (i = 0; i < MAXUNAMES && *f->f_uname[i]; i++)
+					printf("%s, ", f->f_uname[i]);
 				break;
 			default:
 				break;
@@ -2885,8 +2884,8 @@ parse_action(const char *p, struct filed *f)
 			 * scan forward to see if there is a port defined.
 			 * so we can't use strlcpy..
 			 */
-			i = sizeof(f->fu_forw_hname);
-			tp = f->fu_forw_hname;
+			i = sizeof(f->f_hname);
+			tp = f->f_hname;
 			p++;
 
 			/*
@@ -2914,13 +2913,12 @@ parse_action(const char *p, struct filed *f)
 			.ai_family = family,
 			.ai_socktype = SOCK_DGRAM
 		};
-		error = getaddrinfo(f->fu_forw_hname,
-				p ? p : "syslog", &hints, &res);
+		error = getaddrinfo(f->f_hname, p ? p : "syslog", &hints, &res);
 		if (error) {
 			logerror(gai_strerror(error));
 			break;
 		}
-		f->fu_forw_addr = res;
+		f->f_addr = res;
 		f->f_type = F_FORW;
 		break;
 
@@ -2937,21 +2935,20 @@ parse_action(const char *p, struct filed *f)
 				f->f_type = F_CONSOLE;
 			else
 				f->f_type = F_TTY;
-			(void)strlcpy(f->fu_fname, p + sizeof(_PATH_DEV) - 1,
-			    sizeof(f->fu_fname));
+			(void)strlcpy(f->f_fname, p + sizeof(_PATH_DEV) - 1,
+			    sizeof(f->f_fname));
 			/* This will be reopened by ttymsg(). */
 			close(f->f_file);
 			f->f_file = -1;
 		} else {
-			(void)strlcpy(f->fu_fname, p, sizeof(f->fu_fname));
+			(void)strlcpy(f->f_fname, p, sizeof(f->f_fname));
 			f->f_type = F_FILE;
 		}
 		break;
 
 	case '|':
-		f->fu_pipe_pd = -1;
-		(void)strlcpy(f->fu_pipe_pname, p + 1,
-		    sizeof(f->fu_pipe_pname));
+		f->f_procdesc = -1;
+		(void)strlcpy(f->f_pname, p + 1, sizeof(f->f_pname));
 		f->f_type = F_PIPE;
 		break;
 
@@ -2963,11 +2960,11 @@ parse_action(const char *p, struct filed *f)
 		for (i = 0; i < MAXUNAMES && *p; i++) {
 			for (q = p; *q && *q != ','; )
 				q++;
-			(void)strncpy(f->fu_uname[i], p, MAXLOGNAME - 1);
+			(void)strncpy(f->f_uname[i], p, MAXLOGNAME - 1);
 			if ((q - p) >= MAXLOGNAME)
-				f->fu_uname[i][MAXLOGNAME - 1] = '\0';
+				f->f_uname[i][MAXLOGNAME - 1] = '\0';
 			else
-				f->fu_uname[i][q - p] = '\0';
+				f->f_uname[i][q - p] = '\0';
 			while (*q == ',' || *q == ' ')
 				q++;
 			p = q;

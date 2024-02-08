@@ -71,7 +71,8 @@ static struct pcisel getsel(const char *str);
 static void list_bridge(int fd, struct pci_conf *p);
 static void list_bars(int fd, struct pci_conf *p);
 static void list_devs(const char *name, int verbose, int bars, int bridge,
-    int caps, int errors, int vpd, int listmode);
+    int caps, int errors, int topology, int vpd, int listmode);
+static void list_topology(struct pci_conf *p);
 static void list_verbose(struct pci_conf *p);
 static void list_vpd(int fd, struct pci_conf *p);
 static const char *guess_class(struct pci_conf *p);
@@ -90,7 +91,7 @@ usage(void)
 {
 
 	fprintf(stderr, "%s",
-		"usage: pciconf -l [-BbcevV] [device]\n"
+		"usage: pciconf -l [-BbcetvV] [device]\n"
 		"       pciconf -a device\n"
 		"       pciconf -r [-b | -h] device addr[:addr2]\n"
 		"       pciconf -w [-b | -h] device addr value\n"
@@ -104,13 +105,13 @@ main(int argc, char **argv)
 {
 	int c, width;
 	int listmode, readmode, writemode, attachedmode, dumpbarmode;
-	int bars, bridge, caps, errors, verbose, vpd;
+	int bars, bridge, caps, errors, topology, verbose, vpd;
 
 	listmode = readmode = writemode = attachedmode = dumpbarmode = 0;
-	bars = bridge = caps = errors = verbose = vpd= 0;
+	bars = bridge = caps = errors = topology = verbose = vpd= 0;
 	width = 4;
 
-	while ((c = getopt(argc, argv, "aBbcDehlrwVvx")) != -1) {
+	while ((c = getopt(argc, argv, "aBbcDehlrtwVvx")) != -1) {
 		switch(c) {
 		case 'a':
 			attachedmode = 1;
@@ -149,6 +150,10 @@ main(int argc, char **argv)
 			readmode = 1;
 			break;
 
+		case 't':
+			topology = 1;
+			break;
+
 		case 'w':
 			writemode = 1;
 			break;
@@ -180,7 +185,7 @@ main(int argc, char **argv)
 
 	if (listmode) {
 		list_devs(optind + 1 == argc ? argv[optind] : NULL, verbose,
-		    bars, bridge, caps, errors, vpd, listmode);
+		    bars, bridge, caps, errors, topology, vpd, listmode);
 	} else if (attachedmode) {
 		chkattached(argv[optind]);
 	} else if (readmode) {
@@ -202,7 +207,7 @@ main(int argc, char **argv)
 
 static void
 list_devs(const char *name, int verbose, int bars, int bridge, int caps,
-    int errors, int vpd, int listmode)
+    int errors, int topology, int vpd, int listmode)
 {
 	int fd;
 	struct pci_conf_io pc;
@@ -296,6 +301,8 @@ list_devs(const char *name, int verbose, int bars, int bridge, int caps,
 				list_caps(fd, p, caps);
 			if (errors)
 				list_errors(fd, p);
+			if (topology)
+				list_topology(p);
 			if (vpd)
 				list_vpd(fd, p);
 		}
@@ -550,6 +557,12 @@ print_bar(int fd, struct pci_conf *p, const char *label, uint16_t bar_offset)
 	    label, bar_offset, type, range, (uintmax_t)base);
 	printf("size %ju, %s\n", (uintmax_t)bar.pbi_length,
 	    bar.pbi_enabled ? "enabled" : "disabled");
+}
+
+static void
+list_topology(struct pci_conf *p)
+{
+	printf("    NUMA node  = %hd\n", p->pd_numa_domain);
 }
 
 static void

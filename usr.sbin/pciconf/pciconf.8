@@ -23,7 +23,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd May 19, 2025
+.Dd August 20, 2025
 .Dt PCICONF 8
 .Os
 .Sh NAME
@@ -31,7 +31,7 @@
 .Nd diagnostic utility for the PCI bus
 .Sh SYNOPSIS
 .Nm
-.Fl l Oo Fl BbceVv Oc Op Ar device
+.Fl l Oo Fl BbcetVv Oc Op Ar device
 .Nm
 .Fl a Ar device
 .Nm
@@ -223,6 +223,12 @@ will list any errors reported for this device in standard PCI error registers.
 Errors are checked for in the PCI status register,
 the PCI-express device status register,
 and the Advanced Error Reporting status registers.
+.Pp
+If the
+.Fl t
+option is supplied,
+.Nm
+will list available topology information for each device.
 .Pp
 If the
 .Fl v

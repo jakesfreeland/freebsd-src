@@ -198,6 +198,7 @@ MAN=	accept_filter.9 \
 	insmntque.9 \
 	intr_event.9 \
 	intro.9 \
+	ioctl.9 \
 	kasan.9 \
 	KASSERT.9 \
 	kern_reboot.9 \
@@ -1387,6 +1388,10 @@ MLINKS+=intr_event.9 intr_event_add_handler.9 \
 	intr_event.9 intr_event_handle.9 \
 	intr_event.9 intr_event_remove_handler.9 \
 	intr_event.9 intr_priority.9
+MLINKS+=ioctl.9 _IO.9 \
+	ioctl.9 _IOR.9 \
+	ioctl.9 _IOW.9 \
+	ioctl.9 _IOWR.9
 MLINKS+=KASSERT.9 MPASS.9
 MLINKS+=kern_reboot.9 reboot.9 \
 	kern_reboot.9 shutdown_nice.9
